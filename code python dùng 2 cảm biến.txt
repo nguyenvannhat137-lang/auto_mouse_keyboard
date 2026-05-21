@@ -1,0 +1,94 @@
+import serial
+import time
+import mouse
+import keyboard
+import threading
+
+# Cấu hình cổng COM thực tế (Hãy sửa 'COM3' theo đúng máy của bạn)
+CONG_COM = 'COM3'
+TOC_DO = 9600
+
+# Tạo 2 biến toàn cục (Rơ-le số) để lưu trạng thái đèn mới nhất
+den_vang_sang = False
+den_do_sang = False
+
+# -----------------------------------------------------------------
+# LUỒNG 1: CHẠY NGẦM LIÊN TỤC ĐỂ ĐỌC USB TỪ ARDUINO
+# -----------------------------------------------------------------
+def luong_doc_arduino():
+    global den_vang_sang, den_do_sang
+    try:
+        arduino = serial.Serial(port=CONG_COM, baudrate=TOC_DO, timeout=1)
+        time.sleep(2) # Chờ cổng kết nối ổn định
+        print("-> Đã kết nối với Arduino thành công!")
+        
+        while True:
+            if arduino.in_waiting > 0:
+                # Đọc dòng dữ liệu và làm sạch ký tự thừa
+                dong_chu = arduino.readline().decode('utf-8').strip()
+                
+                # Tách chuỗi tại vị trí dấu phẩy
+                mang_du_lieu = dong_chu.split(',')
+                
+                if len(mang_du_lieu) == 2:
+                    # Cập nhật trạng thái vào Rơ-le số (True nếu bằng "1", False nếu bằng "0")
+                    den_vang_sang = (mang_du_lieu[0] == "1")
+                    den_do_sang   = (mang_du_lieu[1] == "1")
+            time.sleep(0.05) # Nghỉ 50ms để giảm tải cho CPU
+            
+    except Exception as e:
+        print(f"LỖI KẾT NỐI ARDUINO: {e}")
+
+# Kích hoạt cho luồng đọc Arduino chạy ngầm tự động độc lập
+threading.Thread(target=luong_doc_arduino, daemon=True).start()
+
+# -----------------------------------------------------------------
+# LUỒNG 2: VÒNG LẶP CHÍNH - CHỜ QUÉT BARCODE VÀ KHÓA LOGIC AN TOÀN
+# -----------------------------------------------------------------
+print("\nHỆ THỐNG SẴN SÀNG! Vui lòng quét mã Barcode...")
+
+while True:
+    # Python tạm dừng tại đây chờ người vận hành quét mã và nhấn Enter
+    ma_lot_quet_duoc = input("\n[INPUT] Nhận dữ liệu từ máy quét: ")
+    
+    if not ma_lot_quet_duoc:
+        continue
+
+    # KIỂM TRA ĐIỀU KIỆN AN TOÀN TRƯỚC KHI BẤM CHUỘT/BÀN PHÍM
+    
+    # TRƯỜNG HỢP 1: Đèn Đỏ sáng -> Máy đang bị lỗi
+    if den_do_sang == True:
+        print(" [CẢNH BÁO ĐỎ] Không thể nạp mã! Máy đang bị lỗi sự cố. Hãy xử lý lỗi trên máy trước.")
+        
+    # TRƯỜNG HỢP 2: Đèn Vàng sáng, Đèn Đỏ tắt -> Máy đang rảnh (Idle) -> THỎA MÃN CHẠY
+    elif den_vang_sang == True and den_do_sang == False:
+        print(f" [MÁY RẢNH] Hợp lệ! Đang tự động nạp mã Recipe: {ma_lot_quet_duoc}")
+        
+        # --- BẮT ĐẦU CHUỖI TỰ ĐỘNG KHÓA VÀ ĐIỀU KHIỂN AUTO GUI ---
+        # Bước 2.1: Di chuột tới Ô đầu tiên trên phần mềm thứ 3 và Click (Thay tọa độ của bạn)
+        mouse.move(500, 300, absolute=True, duration=0.2)
+        mouse.click(button='left')
+        time.sleep(0.1)
+        
+        # Bước 2.2: Xóa sạch chữ cũ trong ô
+        keyboard.send('ctrl+a')
+        keyboard.send('backspace')
+        time.sleep(0.05)
+        
+        # Bước 2.3: Gõ mã Lot mới vừa quét
+        keyboard.write(ma_lot_quet_duoc, delay=0.03)
+        time.sleep(0.1)
+        
+        # Bước 2.4: Nhấn phím TAB để tự động nhảy sang ô tiếp theo (áp dụng tính năng phần mềm 3)
+        keyboard.send('tab')
+        time.sleep(0.1)
+        
+        # (Tại đây bạn có thể viết thêm lệnh gõ cho ô số 2, ô số 3 nếu cần)
+        
+        # Bước 2.5: Nhấn ENTER để kích hoạt phần mềm chạy máy
+        keyboard.send('enter')
+        print("-> Đã hoàn thành tự động nhập và kích hoạt Recipe!")
+
+    # TRƯỜNG HỢP 3: Cả Vàng và Đỏ đều tắt -> Nghĩa là đèn Xanh đang sáng -> Máy đang bận chạy
+    else:
+        print(" [CẢNH BÁO VÀNG] Không thể nạp mã! Máy đang bận chạy sản phẩm cũ. Vui lòng đợi máy xong.")
